@@ -5,6 +5,10 @@ from app.main import app
 client = TestClient(app)
 
 
+def test_root_for_the_deployed_url():
+    assert client.get("/").json()["status"] == "ok"
+
+
 def test_health_for_the_host():
     assert client.get("/health").json()["status"] == "ok"
 
