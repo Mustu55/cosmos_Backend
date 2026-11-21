@@ -16,6 +16,22 @@ def client():
         yield c
 
 
+def test_vercel_frontend_is_allowed_by_cors(client):
+    r = client.get(
+        "/health",
+        headers={"Origin": "https://my-cosmos-r9fj3w8lu-maverickz.vercel.app"},
+    )
+    assert r.status_code == 200
+    assert r.headers["access-control-allow-origin"] == (
+        "https://my-cosmos-r9fj3w8lu-maverickz.vercel.app"
+    )
+
+
+def test_accidental_double_slash_is_accepted(client):
+    assert client.get("//stats").status_code == 200
+    assert client.get("//countries").status_code == 200
+
+
 def test_health_and_stats(client):
     h = client.get("/health").json()
     assert h["status"] == "ok" and h["retrieval"] == "lsa"
@@ -44,6 +60,13 @@ def test_paper_filters_and_paging(client):
     for row in r["items"]:
         assert row["paper"]["country"] == "India"
         assert "Computer Vision" in row["paper"]["derived"]["topics"]
+
+
+@pytest.mark.parametrize("sort", ["newest", "oldest", "title"])
+def test_paper_frontend_sort_values(client, sort):
+    r = client.get("/papers", params={"sort": sort, "page": 1, "page_size": 5})
+    assert r.status_code == 200
+    assert len(r.json()["items"]) <= 5
 
 
 def test_search_interprets_and_explains(client):

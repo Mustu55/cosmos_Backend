@@ -27,6 +27,22 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("cosmos")
 
 
+class NormalizePathMiddleware:
+    """Accept URLs containing accidental repeated slashes."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket"):
+            path = scope.get("path", "")
+            if path.startswith("//"):
+                scope["path"] = "/" + path.lstrip("/")
+                if scope.get("raw_path"):
+                    scope["raw_path"] = scope["path"].encode("ascii")
+        await self.app(scope, receive, send)
+
+
 class State:
     corpus: Corpus
     analytics: Analytics
@@ -61,9 +77,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="COSMOS API", version="0.1.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_methods=["GET", "POST"], allow_headers=["*"])
-
-
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(settings.cors_origins),
+    allow_origin_regex=r"https://([a-z0-9-]+\.)*vercel\.app",
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+app.add_middleware(NormalizePathMiddleware)
 def st(request: Request) -> State:
     return request.app.state.cosmos
 
@@ -116,9 +137,19 @@ def stats(s: State = Depends(st)):
     return s.analytics.stats()
 
 
+@app.get("//stats", response_model=CorpusStats, include_in_schema=False)
+def double_slash_stats(s: State = Depends(st)):
+    return stats(s)
+
+
 @app.get("/domains", response_model=list[Domain])
 def domains(s: State = Depends(st)):
     return s.analytics.domains()
+
+
+@app.get("//domains", response_model=list[Domain], include_in_schema=False)
+def double_slash_domains(s: State = Depends(st)):
+    return domains(s)
 
 
 @app.get("/topics", response_model=list[TopicSummary])
@@ -158,6 +189,11 @@ def countries(s: State = Depends(st)):
     return s.analytics.countries()
 
 
+@app.get("//countries", response_model=list[CountrySummary], include_in_schema=False)
+def double_slash_countries(s: State = Depends(st)):
+    return countries(s)
+
+
 @app.get("/missions", response_model=list[MissionSummary])
 def missions(s: State = Depends(st)):
     return s.analytics.missions()
@@ -190,15 +226,24 @@ def facets(s: State = Depends(st)):
     return s.analytics.facets()
 
 
+@app.get("//papers/facets", response_model=Facets, include_in_schema=False)
+def double_slash_facets(s: State = Depends(st)):
+    return facets(s)
+
+
 @app.get("/papers", response_model=Page[PaperRow])
 def papers(
     q: Optional[str] = None,
-    sort: Optional[Literal["publication_year", "title", "country", "relevance", "-publication_date"]] = None,
+    sort: Optional[Literal["newest", "oldest", "title", "publication_year", "country", "relevance", "-publication_date"]] = None,
     order: Optional[Literal["asc", "desc"]] = None,
     page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=200),
     f: Filters = Depends(), s: State = Depends(st),
 ):
-    if sort == "-publication_date":  # convenience form used by "recent papers"
+    if sort == "newest":
+        sort, order = "publication_year", "desc"
+    elif sort == "oldest":
+        sort, order = "publication_year", "asc"
+    elif sort == "-publication_date":
         sort, order = "publication_year", "desc"
     if q and q.strip():
         _, scored = s.engine.search(q, f.allowed(s))
@@ -208,9 +253,25 @@ def papers(
     return s.analytics.query_papers(rows, sort, order, page, page_size, bool(q and q.strip()))
 
 
+@app.get("//papers", response_model=Page[PaperRow], include_in_schema=False)
+def double_slash_papers(
+    q: Optional[str] = None,
+    sort: Optional[Literal["newest", "oldest", "title", "publication_year", "country", "relevance", "-publication_date"]] = None,
+    order: Optional[Literal["asc", "desc"]] = None,
+    page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=200),
+    f: Filters = Depends(), s: State = Depends(st),
+):
+    return papers(q, sort, order, page, page_size, f, s)
+
+
 @app.get("/papers/recent", response_model=list[Paper])
 def recent(limit: int = Query(6, le=50), s: State = Depends(st)):
     return s.analytics.recent(limit)
+
+
+@app.get("//papers/recent", response_model=list[Paper], include_in_schema=False)
+def double_slash_recent(limit: int = Query(6, le=50), s: State = Depends(st)):
+    return recent(limit, s)
 
 
 @app.get("/papers/{paper_id}", response_model=Paper)

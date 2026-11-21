@@ -25,7 +25,11 @@ class Settings:
         o.strip().rstrip("/")
         for o in os.getenv(
             "COSMOS_CORS_ORIGINS",
-            os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:5174,http://localhost:4173"),
+            os.getenv(
+                "CORS_ORIGINS",
+                "http://localhost:5173,http://localhost:5174,http://localhost:4173,"
+                "https://my-cosmos-r9fj3w8lu-maverickz.vercel.app",
+            ),
         ).split(",")
         if o.strip()
     )
@@ -36,12 +40,12 @@ class Settings:
             return Path(os.environ["DATA_DIR"])
 
         mode = "processed" if self.data_mode == "production" else "mock"
-        candidates = (
-            Path.cwd() / "data" / mode,
-            APP_DIR / "data" / mode,
-            PACKAGE_DIR / "data" / mode,
-            ROOT / "data" / mode,
-        )
+        bases = (Path.cwd(), APP_DIR, PACKAGE_DIR, ROOT)
+        candidates = []
+        for base in bases:
+            candidates.append(base / "data" / mode)
+            if mode == "mock":
+                candidates.append(base / "data")
         for candidate in candidates:
             if (candidate / "papers.json").is_file():
                 return candidate
